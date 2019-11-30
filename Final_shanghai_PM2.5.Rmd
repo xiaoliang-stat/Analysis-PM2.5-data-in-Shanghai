@@ -1,7 +1,7 @@
 ---
 title: "STAT350 Project - ShangHai_PM2.5"
-author: "Xiaoliang Zhang"
-date: "November 12, 2019"
+author: "Xiaoliang-stat"
+date: "November 12"
 output: 
   pdf_document: 
     fig_height: 6
@@ -16,7 +16,7 @@ library(CombMSC)
 #install.packages('leaps')
 library(leaps)
 
-SH=read.csv("~/Desktop/STAT 350/Project/ShanghaiPM20100101_20151231.csv")
+SH=read.csv("ShanghaiPM20100101_20151231.csv")
 
 # remove NA in the response,  NO. & year
 SH=na.omit(SH)
