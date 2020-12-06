@@ -1,0 +1,569 @@
+---
+title: "STAT350 Project - ShangHai_PM2.5"
+author: "Xiaoliang Zhang"
+date: "November 12, 2019"
+output: 
+  pdf_document: 
+    fig_height: 6
+---
+
+
+```{r}
+library(dplyr)
+
+#install.packages('CombMSC')
+library(CombMSC)
+
+#install.packages('leaps')
+library(leaps)
+
+SH=read.csv("~/Desktop/STAT 350/Project/ShanghaiPM20100101_20151231.csv")
+
+# remove NA in the response,  NO. & year
+SH=na.omit(SH)
+SH$PM_Jingan = NULL
+SH$PM_Xuhui = NULL
+SH$No = NULL
+#SH$year = NULL
+dim(SH)
+
+SH = SH %>% filter(year==2015) 
+SH$year = NULL
+
+colnames(SH)[which(names(SH) == "PM_US.Post")] <- "PM2.5"
+
+regfit.full=regsubsets(PM2.5~., data = SH)
+summary(regfit.full)
+
+# nvmax defines the maximum size of subsets to examine
+# default is nvmax = 8
+regfit.full=regsubsets(PM2.5~.,data=SH, nvmax=17)
+(reg.summary=summary(regfit.full))
+
+names(reg.summary)
+reg.summary$rsq
+
+# Plotting RSS, adjusted r^2, Cp and BIC vs Number of Variables
+par(mfrow=c(2,2))
+plot(reg.summary$rss, xlab="Number of Variables", ylab="RSS", type="l")
+plot(reg.summary$adjr2, xlab="Number of Variables", ylab="Adjusted RSq", type="l")
+
+
+# Find the model with the largest adjusted r^2
+which.max(reg.summary$adjr2)
+points(13,reg.summary$adjr2[13], col="red",cex=2,pch=20)
+plot(reg.summary$cp,xlab="Number of Variables",ylab="Cp",type='l')
+
+
+# Find the model with the lowest cp
+which.min(reg.summary$cp)
+points(12,reg.summary$cp[12],col="red",cex=2,pch=20)
+
+
+# Find the model with the lowest BIC
+which.min(reg.summary$bic)
+plot(reg.summary$bic,xlab="Number of Variables",ylab="BIC",type='l')
+points(10,reg.summary$bic[10],col="red",cex=2,pch=20)
+
+
+# Plotting RSS, adjusted r^2, Cp and BIC for comparison
+par(mfrow=c(2,2))
+plot(regfit.full,scale="r2")
+plot(regfit.full,scale="adjr2")
+plot(regfit.full,scale="Cp")
+plot(regfit.full,scale="bic")
+
+# According to BIC, a 6-variable model is the best model
+coef(regfit.full,10)
+```
+
+
+```{r}
+plot(table(SH$cbwd)/length(SH$cbwd),ylim=c(0,1), ylab = "Probability", main="cbwd")
+```
+
+# All variable selection methods
+```{r}
+library(MASS)
+library(e1071)
+
+success_model = lm(PM2.5~month+hour+season+PRES+TEMP+cbwd+Iws+Iprec, data=SH)
+summary(success_model)
+# plot(success_model)
+
+mfit_null1 = lm(PM2.5~1, data = SH)
+#mfit_full2 = lm(PM2.5~hour+season+DEWP+HUMI+PRES+TEMP+cbwd+Iws+Iprec, data=SH)
+mfit_full2 = lm(PM2.5~month+hour+season+PRES+TEMP+cbwd+Iws+Iprec, data=SH)
+
+
+step.model_suc1=step(mfit_null1, data=SH, scope = list(upper=mfit_full2), direction = "both")
+
+step.model_suc2=step(mfit_null1, data=SH, scope = list(lower=mfit_null1, upper=mfit_full2), direction = "forward")
+
+step.model_suc3=step(mfit_full2, data=SH, direction = "backward")
+
+s1_1=summary(step.model_suc1)
+step.model_suc1$anova
+
+mse.step1_1=mean(step.model_suc1$residuals^2)
+mse.step1_1
+
+s2_2=summary(step.model_suc2)
+step.model_suc2$anova
+
+mse.forward2_2=mean(step.model_suc2$residuals^2)
+mse.forward2_2
+
+s3_3=summary(step.model_suc3)
+step.model_suc3$anova
+
+mse.backward3_3=mean(step.model_suc3$residuals^2)
+mse.backward3_3
+```
+
+
+
+
+Box-cox
+===
+  
+  
+```{r}
+y          = SH$PM2.5
+n_dt       = length(SH$PM2.5)
+y_dot      = exp(sum(log(y)/n_dt))
+lambda_vec = c(-2, -1, -0.5, 0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 1,2)
+SSE_lambda = rep(NA, length(lambda_vec))
+
+for (i in 1:length(lambda_vec))
+{
+  lambda = lambda_vec[i]
+  
+  if (lambda != 0)
+  {
+    y_lambda = ((y^lambda) - 1)/(lambda*(y_dot^(lambda-1)))
+  } else {
+    y_lambda = y_dot*log(y)
+  }
+  
+  temp_model    = lm(y_lambda~hour+season+DEWP+HUMI+PRES+TEMP+cbwd+Iws+Iprec,data=SH)
+  temp_anova    = anova(temp_model)
+  SSE_lambda[i] = temp_anova$`Sum Sq`[2]
+}
+
+plot(lambda_vec, SSE_lambda, type='b', pch=16, xlab='Lambda', ylab='SSE(Lambda)', main='Box-Cox: The Electric Utility Data')
+plot(lambda_vec, SSE_lambda, ylim=c(100,500), type='b', pch=16, xlab='Lambda', ylab='SSE(Lambda)', main='Box-Cox: The Electric Utility Data')
+abline(v=0.5, col='red', lwd=2)
+abline(h=SSE_lambda[8], col='red', lwd=2)
+
+#################
+# Optimal model #
+
+opt_y = ((y^-1) - 1)/(-1*(y_dot^(-1-1)))
+
+opt_model = lm(opt_y~hour+season+DEWP+HUMI+PRES+TEMP+cbwd+Iws+Iprec, data=SH)
+
+summary(opt_model)
+#anova(opt_model)
+```
+
+
+
+
+
+
+```{r}
+m1=lm(PM2.5~month,data=SH)
+summary(m1)
+OLS_Res = m1$residuals
+Std_Res = rstandard(m1) # Standardized Resiudals
+Stu_Res = studres(m1) # Studentized Residuals
+rStu_Res = rstudent(m1) # R-Student Residuals
+
+par(mfrow=c(2,2))
+probplot(OLS_Res, qnorm, xlab='OLS Residuals', ylab='Percent')
+probplot(Std_Res, qnorm, xlab='Standardized Residuals', ylab='Percent')
+probplot(Stu_Res, qnorm, xlab='Studentized Residuals', ylab='Percent')
+probplot(rStu_Res, qnorm, xlab='R-Student Residuals', ylab='Percent')
+
+par(mfrow=c(2,2))
+plot(SH$month, Std_Res, ylab='Standardized Residuals', xlab='month', pch=16)
+abline(h=0)
+plot(SH$month,SH$PM2.5)
+
+hist(SH$month)
+hist(log(SH$month))
+plot(log(SH$month),log(SH$PM2.5))
+m11=lm(log(PM2.5)~log(month),data=SH)
+summary(m11)
+Std_Res_transform = rstandard(m11) # Standardized Resiudals
+plot(log(SH$month), Std_Res_transform, ylab='Standardized Residuals', xlab='month', pch=16)
+abline(h=0)
+
+OLS_Res11 = m11$residuals
+Std_Res11 = rstandard(m11) # Standardized Resiudals
+Stu_Res11 = studres(m11) # Studentized Residuals
+rStu_Res11 = rstudent(m11) # R-Student Residuals
+
+par(mfrow=c(2,2))
+probplot(OLS_Res11, qnorm, xlab='OLS Residuals', ylab='Percent')
+probplot(Std_Res11, qnorm, xlab='Standardized Residuals', ylab='Percent')
+probplot(Stu_Res11, qnorm, xlab='Studentized Residuals', ylab='Percent')
+probplot(rStu_Res11, qnorm, xlab='R-Student Residuals', ylab='Percent')
+```
+
+
+```{r}
+m2=lm(PM2.5~hour, data=SH)
+summary(m2)
+OLS_Res = m2$residuals
+Std_Res = rstandard(m2) # Standardized Resiudals
+Stu_Res = studres(m2) # Studentized Residuals
+rStu_Res = rstudent(m2) # R-Student Residuals
+
+par(mfrow=c(2,2))
+probplot(OLS_Res, qnorm, xlab='OLS Residuals', ylab='Percent')
+probplot(Std_Res, qnorm, xlab='Standardized Residuals', ylab='Percent')
+probplot(Stu_Res, qnorm, xlab='Studentized Residuals', ylab='Percent')
+probplot(rStu_Res, qnorm, xlab='R-Student Residuals', ylab='Percent')
+
+par(mfrow=c(2,2))
+plot(SH$hour, Std_Res, ylab='Standardized Residuals', xlab='hour', pch=16)
+abline(h=0)
+plot(SH$hour,SH$PM2.5)
+
+hist(SH$hour)
+hist(SH$hour)
+hist(log(SH$hour))
+hist(log(SH$PM2.5))
+plot(log(SH$hour),log(SH$PM2.5))
+
+
+m22=lm(log(PM2.5)~log(1+hour),data=SH)
+summary(m22)
+Std_Res_transform = rstandard(m22) # Standardized Resiudals
+plot(log(SH$hour), Std_Res_transform, ylab='Standardized Residuals', xlab='Iws', pch=16)
+abline(h=0)
+
+OLS_Res11 = m22$residuals
+Std_Res11 = rstandard(m22) # Standardized Resiudals
+Stu_Res11 = studres(m22) # Studentized Residuals
+rStu_Res11 = rstudent(m22) # R-Student Residuals
+
+par(mfrow=c(2,2))
+probplot(OLS_Res11, qnorm, xlab='OLS Residuals', ylab='Percent')
+probplot(Std_Res11, qnorm, xlab='Standardized Residuals', ylab='Percent')
+probplot(Stu_Res11, qnorm, xlab='Studentized Residuals', ylab='Percent')
+probplot(rStu_Res11, qnorm, xlab='R-Student Residuals', ylab='Percent')
+```
+
+
+
+
+
+```{r}
+m3=lm(PM2.5~Iws, data=SH)
+summary(m3)
+OLS_Res = m3$residuals
+Std_Res = rstandard(m3) # Standardized Resiudals
+Stu_Res = studres(m3) # Studentized Residuals
+rStu_Res = rstudent(m3) # R-Student Residuals
+
+par(mfrow=c(2,2))
+probplot(OLS_Res, qnorm, xlab='OLS Residuals', ylab='Percent')
+probplot(Std_Res, qnorm, xlab='Standardized Residuals', ylab='Percent')
+probplot(Stu_Res, qnorm, xlab='Studentized Residuals', ylab='Percent')
+probplot(rStu_Res, qnorm, xlab='R-Student Residuals', ylab='Percent')
+
+par(mfrow=c(2,2))
+plot(SH$Iprec, Std_Res, ylab='Standardized Residuals', xlab='Iprec', pch=16)
+abline(h=0)
+plot(SH$Iprec,SH$PM2.5)
+
+hist(SH$Iws)
+hist(SH$Iws)
+hist(log(SH$Iws))
+hist(log(SH$PM2.5))
+plot(log(SH$Iws),log(SH$PM2.5))
+
+
+m33=lm(log(PM2.5)~log(1+Iws),data=SH)
+summary(m33)
+Std_Res_transform = rstandard(m33) # Standardized Resiudals
+plot(log(SH$Iprec), Std_Res_transform, ylab='Standardized Residuals', xlab='Iws', pch=16)
+abline(h=0)
+
+OLS_Res11 = m33$residuals
+Std_Res11 = rstandard(m33) # Standardized Resiudals
+Stu_Res11 = studres(m33) # Studentized Residuals
+rStu_Res11 = rstudent(m33) # R-Student Residuals
+
+par(mfrow=c(2,2))
+probplot(OLS_Res11, qnorm, xlab='OLS Residuals', ylab='Percent')
+probplot(Std_Res11, qnorm, xlab='Standardized Residuals', ylab='Percent')
+probplot(Stu_Res11, qnorm, xlab='Studentized Residuals', ylab='Percent')
+probplot(rStu_Res11, qnorm, xlab='R-Student Residuals', ylab='Percent')
+```
+
+```{r}
+hist(SH$month)
+hist(log(SH$month))
+
+hist(SH$day)
+hist(log(SH$day))
+
+hist(SH$hour)
+hist(log(SH$hour))
+
+hist(SH$season)
+hist(log(SH$season))
+
+hist(SH$PM2.5)
+hist(log(SH$PM2.5))
+
+hist(SH$DEWP)
+hist(log(1+SH$DEWP))
+
+hist(SH$HUMI)
+#hist(log(SH$HUMI))
+hist((SH$HUMI)^2)
+
+hist(SH$PRES)
+hist(log(SH$PRES))
+
+hist(SH$TEMP)
+hist(log(SH$TEMP))
+
+hist(SH$Iws)
+hist(log(SH$Iws))
+
+hist(SH$precipitation)
+hist(log(SH$precipitation))
+
+hist(SH$Iprec)
+hist(log(SH$Iprec))
+```
+
+
+```{r}
+temp=SH[,c(1,3,4,5,8,9,11,13)]
+pairs(temp)
+
+temp$PM2.5=log(temp$PM2.5)
+temp$month=log(temp$month)
+temp$hour=log(temp$hour)
+temp$season=log(temp$season)
+temp$PRES=log((temp$PRES))
+#temp$TEMP=log(temp$TEMP)
+temp$Iws=log(1+temp$Iws)
+temp$Iprec=log(1+temp$Iprec)
+pairs(temp)
+
+success_model_transform=lm(log(PM2.5)~log(month)+log(1+hour)+log(season)+log(PRES)+TEMP+log(1+Iws)+cbwd+log(1+Iprec),data=SH)
+summary(success_model_transform)
+
+attach(SH)
+
+plot(log(month)+log(1+hour)+log(season)+log(PRES)+TEMP+log(1+Iws)+log(1+Iprec),log(PM2.5))
+OLS_Res = success_model_transform$residuals
+Std_Res = rstandard(success_model_transform) # Standardized Resiudals
+Stu_Res = studres(success_model_transform) # Studentized Residuals
+rStu_Res = rstudent(success_model_transform) # R-Student Residuals
+
+par(mfrow=c(2,2))
+probplot(OLS_Res, qnorm, xlab='OLS Residuals', ylab='Percent')
+probplot(Std_Res, qnorm, xlab='Standardized Residuals', ylab='Percent')
+probplot(Stu_Res, qnorm, xlab='Studentized Residuals', ylab='Percent')
+probplot(rStu_Res, qnorm, xlab='R-Student Residuals', ylab='Percent')
+
+par(mfrow=c(2,2))
+plot(success_model)
+plot(success_model_transform)
+```
+
+
+
+variable selection forward, backward, stepwise
+===
+
+
+```{r}
+mfit_null= lm(log(PM2.5)~1, data=SH)
+mfit_full= lm(log(PM2.5)~log(month)+log(1+hour)+log(season)+log(PRES)+TEMP+log(1+Iws)+cbwd+log(1+Iprec),data=SH)
+
+step.model1=step(mfit_null, data=SH,scope=list(upper=mfit_full), direction="both")
+
+step.model2=step(mfit_null, data=SH, scope=list(lower=mfit_null, upper=mfit_full), direction="forward")
+
+step.model3=step(mfit_full, data=SH, direction="backward")
+
+s1=summary(step.model1)
+step.model1$anova
+mse.step=mean(step.model1$residuals^2)
+mse.step
+
+s2=summary(step.model2)
+step.model2$anova
+mse.forward=mean(step.model2$residuals^2)
+mse.forward
+
+s3=summary(step.model3)
+step.model3$anova
+mse.backward=mean(step.model3$residuals^2)
+mse.backward
+```
+
+
+Cross validation
+===
+
+
+```{r}
+temp$cbwd=SH$cbwd
+
+# Choosing Among Models
+set.seed(1)
+
+# splitting the data into a training set and a test set
+train=sample(c(TRUE,FALSE), nrow(temp),rep=TRUE)
+test=(!train)
+regfit.best=regsubsets(PM2.5~.,data=temp[train,], nvmax=10)
+test.mat=model.matrix(PM2.5~.,data=temp[test,])
+val.errors=rep(NA,10)
+for(i in 1:10){
+  coefi=coef(regfit.best,id=i)
+  pred=test.mat[,names(coefi)]%*%coefi
+  val.errors[i]=mean((temp$PM2.5[test]-pred)^2)
+}
+val.errors
+
+# find the best model with the lowest test error
+which.min(val.errors)
+
+coef(regfit.best,8)
+
+# create our own prediction function for regsubsets object
+predict.regsubsets=function(object,newdata,id,...){
+  form=as.formula(object$call[[2]])
+  mat=model.matrix(form,newdata)
+  coefi=coef(object,id=id)
+  xvars=names(coefi)
+  mat[,xvars]%*%coefi
+}
+
+regfit.best=regsubsets(Apps~.,data=temp,nvmax=10)
+
+# getting the coefficients for the 5-variable model
+coef(regfit.best,8)
+
+# 5-fold cross-validation
+k=5
+set.seed(1)
+folds=sample(1:k,nrow(temp),replace=TRUE)
+cv.errors=matrix(NA,k,10, dimnames=list(NULL, paste(1:10)))
+
+# (i,j)th element corresponds to the test MSE for the ith cross-validation fold
+# for the best j-variable model
+
+for(j in 1:k){
+  best.fit=regsubsets(PM2.5~.,data=temp[folds!=j,],nvmax=10)
+  for(i in 1:10){
+    pred=predict(best.fit,temp[folds==j,],id=i)
+    cv.errors[j,i]=mean( (temp$PM2.5[folds==j]-pred)^2)
+  }
+}
+cv.errors
+
+# apply() function averages over the columns of the matrix
+mean.cv.errors=apply(cv.errors,2,mean)
+mean.cv.errors
+mse.allsub = min(mean.cv.errors)
+mse.allsub
+par(mfrow=c(1,1))
+plot(mean.cv.errors,type='b')
+reg.best=regsubsets(PM2.5~.,data=temp, nvmax=10)
+
+coef(reg.best,10)
+summary(reg.best)
+```
+
+
+### Ridge and Lasso 
+```{r}
+# Ridge Regression and the Lasso
+
+# x matrix with the intercept
+head(model.matrix(PM2.5~.,temp))
+
+# x matrix without the intercept
+head(model.matrix(PM2.5~.,temp)[,-1])
+
+# we used the x matrix without the intercept here
+x = model.matrix(PM2.5~.,temp)[,-1]
+y = temp$PM2.5
+```
+
+
+
+```{r}
+# Ridge Regression
+
+library(glmnet)
+grid = 10^seq(10,-2,length=100)
+# ridge regression is defined when alpha = 0
+
+# split the data into training and test set
+set.seed(1)
+train=sample(1:nrow(x), nrow(x)/2)
+train=sample(c(TRUE,FALSE), nrow(temp),rep=TRUE)
+test=(-train)
+y.train = y[train]
+y.test = y[test]
+# use cross-validation to select the best lambda in ridge
+set.seed(1)
+cv.out=cv.glmnet(x[train,],y[train],alpha=0)
+plot(cv.out)
+bestlam=cv.out$lambda.1se
+bestlam
+ridge.mod=glmnet(x[train,],y[train],alpha=0,lambda=grid)
+ridge.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+# calculate the mean square error
+mse.ridge = mean((ridge.pred-y.test)^2)
+mse.ridge
+# refit ridge regression using the full data
+out=glmnet(x,y,alpha=0)
+predict(out,type="coefficients",s=bestlam)[1:10,]
+
+# The Lasso
+
+lasso.mod=glmnet(x[train,],y[train],alpha=1,lambda=grid)
+plot(lasso.mod)
+set.seed(1)
+# use cross-validation to select the best lambda in LASSO
+cv.out=cv.glmnet(x[train,],y[train],alpha=1)
+plot(cv.out)
+coef(cv.out)
+bestlam=cv.out$lambda.1se
+bestlam
+
+lasso.pred=predict(lasso.mod,s=bestlam,newx=x[test,])
+# calculate the mean square error
+mse.lasso = mean((lasso.pred-y.test)^2)
+mse.lasso
+
+# refit LASSO regression using the full data
+out=glmnet(x,y,alpha=1,lambda=grid)
+lasso.coef=predict(out,type="coefficients",s=bestlam)[1:10,]
+# some coefficients are shrunk to zero
+lasso.coef
+
+# get the non-zero coefficients
+lasso.coef[lasso.coef!=0]
+
+# compare the cross validation error of three methods
+rbind(mse.allsub, mse.ridge, mse.lasso,mse.step,mse.forward,mse.backward)
+
+```
+
+
+
